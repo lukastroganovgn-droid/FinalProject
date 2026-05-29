@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 import telebot
 from telebot import types
+import random
 
 load_dotenv()
 
@@ -92,3 +93,6 @@ def handle_category(call):
 if __name__ == "__main__":
     print("Бот запущен...")
     bot.infinity_polling()
+
+
+
