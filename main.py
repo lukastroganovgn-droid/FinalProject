@@ -1,37 +1,96 @@
 import os
 from dotenv import load_dotenv
+import sqlite3
 import telebot
 from telebot import types
-import random
 
 load_dotenv()
 
 api_key = os.getenv("TOKEN")
 
-# Замените на токен вашего бота от @BotFather
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(api_key)
 
-# Имитация Базы Данных (Требование 4)
-# В будущем эти данные стартап сможет легко перенести в SQLite/PostgreSQL
-PROFESSIONS_DB = {
-    "teen": {
-        "it": {"title": "Разработчик игр", "desc": "Создает миры и логику видеоигр. Подходит, если ты любишь математику, логику и гейминг."},
-        "design": {"title": "2D/3D Художник", "desc": "Рисует персонажей и локации для игр и анимации. Нужен навык рисования и графический планшет."}
-    },
-    "adult": {
-        "it": {"title": "Специалист по Кибербезопасности", "desc": "Защищает данные компаний от хакеров. Огромный спрос на рынке, высокая оплата."},
-        "design": {"title": "UX/UI Дизайнер", "desc": "Проектирует удобные интерфейсы сайтов и приложений. Ценится прошлый жизненный опыт."}
-    }
-}
+DB_NAME = "career_bot.db"
 
-# Временное хранилище ответов пользователей в памяти (для адаптивности)
-user_states = {}
+# --- Инициализация Базы Данных ---
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # 1. Таблица профессий (Требование 4)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS professions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL,
+            audience TEXT NOT NULL,
+            description TEXT NOT NULL
+        )
+    ''')
+    
+    # 2. Таблица состояний пользователей (для адаптации)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_states (
+            user_id INTEGER PRIMARY KEY,
+            audience TEXT NOT NULL
+        )
+    ''')
+    
+    conn.commit()
+    
+    # Заполняем базу начальными данными, если она пустая
+    cursor.execute("SELECT COUNT(*) FROM professions")
+    if cursor.fetchone()[0] == 0:
+        demo_data = [
+            ("Разработчик игр", "it", "teen", "Создает миры и логику видеоигр. Подходит, если ты любишь математику, логику и гейминг."),
+            ("2D/3D Художник", "design", "teen", "Рисует персонажей и локации для игр и анимации. Нужен навык рисования."),
+            ("Специалист по Кибербезопасности", "it", "adult", "Защищает данные компаний от хакеров. Огромный спрос на рынке, высокая оплата."),
+            ("UX/UI Дизайнер", "design", "adult", "Проектирует удобные интерфейсы сайтов и приложений. Ценится прошлый жизненный опыт.")
+        ]
+        cursor.executemany(
+            "INSERT INTO professions (title, category, audience, description) VALUES (?, ?, ?, ?)", 
+            demo_data
+        )
+        conn.commit()
+        print("База данных успешно инициализирована и заполнена демо-данными!")
+        
+    conn.close()
 
-# --- Команда /start ---
+# --- Вспомогательные функции для работы с БД ---
+def save_user_audience(user_id, audience):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    # INSERT OR REPLACE обновляет запись, если пользователь проходит тест заново
+    cursor.execute(
+        "INSERT OR REPLACE INTO user_states (user_id, audience) VALUES (?, ?)", 
+        (user_id, audience)
+    )
+    conn.commit()
+    conn.close()
+
+def get_user_audience(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT audience FROM user_states WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+def get_profession(audience, category):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT title, description FROM professions WHERE audience = ? AND category = ? LIMIT 1", 
+        (audience, category)
+    )
+    result = cursor.fetchone()
+    conn.close()
+    return result # Возвращает кортеж (title, description) или None
+
+# --- Обработчики Telegram ---
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Создаем главное меню (обычные кнопки под полем ввода)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     btn_teen = types.KeyboardButton("Я подросток / студент")
     btn_adult = types.KeyboardButton("Хочу сменить профессию")
@@ -44,16 +103,14 @@ def send_welcome(message):
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
-# --- Обработка выбора аудитории (Требование 1) ---
 @bot.message_handler(func=lambda message: message.text in ["Я подросток / студент", "Хочу сменить профессию"])
 def handle_audience(message):
     chat_id = message.chat.id
-    # Сохраняем тип пользователя
-    user_states[chat_id] = {
-        "audience": "teen" if "подросток" in message.text else "adult"
-    }
+    audience = "teen" if "подросток" in message.text else "adult"
     
-    # Создаем Инлайн-кнопки для выбора сферы (Требование 2)
+    # Сохраняем выбор в БД SQLite
+    save_user_audience(chat_id, audience)
+    
     markup = types.InlineKeyboardMarkup()
     btn_it = types.InlineKeyboardButton("Технологии и IT", callback_data="category_it")
     btn_design = types.InlineKeyboardButton("Творчество и Дизайн", callback_data="category_design")
@@ -61,38 +118,38 @@ def handle_audience(message):
     
     bot.send_message(chat_id, "Какая сфера тебе ближе?", reply_markup=markup)
 
-# --- Обработка нажатий на инлайн-кнопки (Требование 2 и 3) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("category_"))
 def handle_category(call):
     chat_id = call.message.chat.id
     category_selected = call.data.split("_")[1] # 'it' или 'design'
     
-    # Проверяем, есть ли сохраненный профиль пользователя
-    if chat_id not in user_states:
+    # Получаем целевую аудиторию пользователя из БД SQLite
+    audience = get_user_audience(chat_id)
+    
+    if not audience:
         bot.send_message(chat_id, "Пожалуйста, начни сначала, введя команду /start")
+        bot.answer_callback_query(call.id)
         return
         
-    audience = user_states[chat_id]["audience"]
+    # Делаем SQL-запрос для поиска нужной профессии
+    prof_data = get_profession(audience, category_selected)
     
-    # Достаем подходящую профессию из нашей "БД" (Персонализация)
-    prof_data = PROFESSIONS_DB[audience][category_selected]
+    if prof_data:
+        title, description = prof_data
+        response_text = (
+            f"**Твоя рекомендация:**\n\n"
+            f"**{title}**\n\n"
+            f"*Описание:* {description}\n\n"
+            f"Желаешь посмотреть другие варианты? Жми /start"
+        )
+    else:
+        response_text = "К сожалению, подходящая профессия не найдена в базе данных. Попробуй заново: /start"
     
-    # Легковоспринимаемый формат вывода (Требование 3)
-    response_text = (
-        f"**Твоя рекомендация:**\n\n"
-        f"**{prof_data['title']}**\n\n"
-        f"*Описание:* {prof_data['desc']}\n\n"
-        f"Желаешь посмотреть другие варианты? Жми /start"
-    )
-    
-    # Убираем часы загрузки на инлайн-кнопке и отправляем ответ
     bot.answer_callback_query(call.id)
     bot.send_message(chat_id, response_text, parse_mode="Markdown")
 
-# Запуск бота
 if __name__ == "__main__":
-    print("Бот запущен...")
+    # Инициализируем БД перед запуском бота
+    init_db()
+    print("Бот успешно запущен")
     bot.infinity_polling()
-
-
-
