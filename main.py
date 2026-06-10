@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import sqlite3
 import telebot
 from telebot import types
+import random
 
 load_dotenv()
 
@@ -12,12 +13,10 @@ bot = telebot.TeleBot(api_key)
 
 DB_NAME = "career_bot.db"
 
-# --- Инициализация Базы Данных ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # 1. Таблица профессий (Требование 4)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS professions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +27,6 @@ def init_db():
         )
     ''')
     
-    # 2. Таблица состояний пользователей (для адаптации)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_states (
             user_id INTEGER PRIMARY KEY,
@@ -38,7 +36,6 @@ def init_db():
     
     conn.commit()
     
-    # Заполняем базу начальными данными, если она пустая
     cursor.execute("SELECT COUNT(*) FROM professions")
     if cursor.fetchone()[0] == 0:
         demo_data = [
@@ -56,11 +53,9 @@ def init_db():
         
     conn.close()
 
-# --- Вспомогательные функции для работы с БД ---
 def save_user_audience(user_id, audience):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # INSERT OR REPLACE обновляет запись, если пользователь проходит тест заново
     cursor.execute(
         "INSERT OR REPLACE INTO user_states (user_id, audience) VALUES (?, ?)", 
         (user_id, audience)
@@ -85,9 +80,7 @@ def get_profession(audience, category):
     )
     result = cursor.fetchone()
     conn.close()
-    return result # Возвращает кортеж (title, description) или None
-
-# --- Обработчики Telegram ---
+    return result
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -108,7 +101,6 @@ def handle_audience(message):
     chat_id = message.chat.id
     audience = "teen" if "подросток" in message.text else "adult"
     
-    # Сохраняем выбор в БД SQLite
     save_user_audience(chat_id, audience)
     
     markup = types.InlineKeyboardMarkup()
@@ -121,9 +113,8 @@ def handle_audience(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("category_"))
 def handle_category(call):
     chat_id = call.message.chat.id
-    category_selected = call.data.split("_")[1] # 'it' или 'design'
+    category_selected = call.data.split("_")[1]
     
-    # Получаем целевую аудиторию пользователя из БД SQLite
     audience = get_user_audience(chat_id)
     
     if not audience:
@@ -131,7 +122,6 @@ def handle_category(call):
         bot.answer_callback_query(call.id)
         return
         
-    # Делаем SQL-запрос для поиска нужной профессии
     prof_data = get_profession(audience, category_selected)
     
     if prof_data:
@@ -149,7 +139,6 @@ def handle_category(call):
     bot.send_message(chat_id, response_text, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    # Инициализируем БД перед запуском бота
     init_db()
     print("Бот успешно запущен")
     bot.infinity_polling()

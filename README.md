@@ -14,7 +14,6 @@
 
 ## Библиотеки
 -pyTelegramBotAPI
--schedule
 -sqlite3
 
 ## Какие команды есть в тг боте
