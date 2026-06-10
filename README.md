@@ -20,8 +20,6 @@
 ## Какие команды есть в тг боте
 /start
 /help
-/schedule
-/allschoolschedule
 
 ## Как запустить проект
 ``
