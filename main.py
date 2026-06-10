@@ -1,86 +1,9 @@
-import os
-from dotenv import load_dotenv
-import sqlite3
-import telebot
 from telebot import types
-import random
+from bot import bot
+import logic
 
-load_dotenv()
-
-api_key = os.getenv("TOKEN")
-
-bot = telebot.TeleBot(api_key)
-
-DB_NAME = "career_bot.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS professions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            category TEXT NOT NULL,
-            audience TEXT NOT NULL,
-            description TEXT NOT NULL
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_states (
-            user_id INTEGER PRIMARY KEY,
-            audience TEXT NOT NULL
-        )
-    ''')
-    
-    conn.commit()
-    
-    cursor.execute("SELECT COUNT(*) FROM professions")
-    if cursor.fetchone()[0] == 0:
-        demo_data = [
-            ("Разработчик игр", "it", "teen", "Создает миры и логику видеоигр. Подходит, если ты любишь математику, логику и гейминг."),
-            ("2D/3D Художник", "design", "teen", "Рисует персонажей и локации для игр и анимации. Нужен навык рисования."),
-            ("Специалист по Кибербезопасности", "it", "adult", "Защищает данные компаний от хакеров. Огромный спрос на рынке, высокая оплата."),
-            ("UX/UI Дизайнер", "design", "adult", "Проектирует удобные интерфейсы сайтов и приложений. Ценится прошлый жизненный опыт.")
-        ]
-        cursor.executemany(
-            "INSERT INTO professions (title, category, audience, description) VALUES (?, ?, ?, ?)", 
-            demo_data
-        )
-        conn.commit()
-        print("База данных успешно инициализирована и заполнена демо-данными!")
-        
-    conn.close()
-
-def save_user_audience(user_id, audience):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT OR REPLACE INTO user_states (user_id, audience) VALUES (?, ?)", 
-        (user_id, audience)
-    )
-    conn.commit()
-    conn.close()
-
-def get_user_audience(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT audience FROM user_states WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else None
-
-def get_profession(audience, category):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT title, description FROM professions WHERE audience = ? AND category = ? LIMIT 1", 
-        (audience, category)
-    )
-    result = cursor.fetchone()
-    conn.close()
-    return result
+# Инициализируем базу данных при старте скрипта
+logic.init_db()
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -101,12 +24,15 @@ def handle_audience(message):
     chat_id = message.chat.id
     audience = "teen" if "подросток" in message.text else "adult"
     
-    save_user_audience(chat_id, audience)
+    logic.save_user_audience(chat_id, audience)
     
-    markup = types.InlineKeyboardMarkup()
-    btn_it = types.InlineKeyboardButton("Технологии и IT", callback_data="category_it")
-    btn_design = types.InlineKeyboardButton("Творчество и Дизайн", callback_data="category_design")
-    markup.add(btn_it, btn_design)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_it = types.InlineKeyboardButton("IT и Технологии", callback_data="category_it")
+    btn_design = types.InlineKeyboardButton("Дизайн", callback_data="category_design")
+    btn_marketing = types.InlineKeyboardButton("Маркетинг", callback_data="category_marketing")
+    btn_management = types.InlineKeyboardButton("Менеджмент", callback_data="category_management")
+    
+    markup.add(btn_it, btn_design, btn_marketing, btn_management)
     
     bot.send_message(chat_id, "Какая сфера тебе ближе?", reply_markup=markup)
 
@@ -115,14 +41,14 @@ def handle_category(call):
     chat_id = call.message.chat.id
     category_selected = call.data.split("_")[1]
     
-    audience = get_user_audience(chat_id)
+    audience = logic.get_user_audience(chat_id)
     
     if not audience:
         bot.send_message(chat_id, "Пожалуйста, начни сначала, введя команду /start")
         bot.answer_callback_query(call.id)
         return
         
-    prof_data = get_profession(audience, category_selected)
+    prof_data = logic.get_profession(audience, category_selected)
     
     if prof_data:
         title, description = prof_data
@@ -133,12 +59,11 @@ def handle_category(call):
             f"Желаешь посмотреть другие варианты? Жми /start"
         )
     else:
-        response_text = "К сожалению, подходящая профессия не найдена в базе данных. Попробуй заново: /start"
+        response_text = "К сожалению, подходящая профессия не найдена в базе. Попробуй заново: /start"
     
     bot.answer_callback_query(call.id)
     bot.send_message(chat_id, response_text, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    init_db()
-    print("Бот успешно запущен")
+    print("Бот успешно запущен в модульной архитектуре...")
     bot.infinity_polling()
