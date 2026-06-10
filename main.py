@@ -65,5 +65,5 @@ def handle_category(call):
     bot.send_message(chat_id, response_text, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    print("Бот успешно запущен в модульной архитектуре...")
+    print("Бот успешно запущен")
     bot.infinity_polling()
